@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Разметка RAG</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .split { height: 90vh; }
+        .scrollable { height: 100%; overflow-y: auto; }
+        .chunk { cursor: pointer; transition: 0.2s; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
+        .chunk:hover { background-color: #f8f9fa; }
+        .chunk.selected { background-color: #e2e3e5; border-color: #0d6efd; border-width: 2px; box-shadow: 0 0 5px rgba(13,110,253,0.5); }
+        .highlight { background-color: yellow; font-weight: bold; }
+        .disabled-card { opacity: 0.6; pointer-events: none; }
+    </style>
+</head>
+<body class="container-fluid py-3">
+
+<div class="row mb-3">
+    <div class="col-3">
+        <select id="analystSelect" class="form-select" onchange="loadDocuments()">
+            <option value="">-- Выберите аналитика --</option>
+        </select>
+    </div>
+    <div class="col-6"><h4>RAG Разметка датасета</h4></div>
+</div>
+
+<div class="row split" id="mainWorkspace" style="display: none;">
+    <div class="col-2 scrollable border-end" id="docList"></div>
+    
+    <div class="col-4 scrollable border-end">
+        <iframe id="pdfViewer" style="width: 100%; height: 100%;"></iframe>
+    </div>
+    
+    <div class="col-6 scrollable">
+        <div class="card mb-3" id="qaCard">
+            <div class="card-header bg-primary text-white">Добавить вопрос (осталось: <span id="qLeft">2</span>/2)</div>
+            <div class="card-body">
+                <input type="text" id="questionInput" class="form-control mb-2" placeholder="Что спрашивает пользователь?">
+                <input type="text" id="keywordInput" class="form-control mb-2" placeholder="Ключевая фраза (для тестов, copy-paste из текста)">
+                <div class="text-muted small mb-2">Выбранный чанк: <span id="selectedChunkId" class="fw-bold text-primary">Не выбран</span></div>
+                <button class="btn btn-success" id="saveBtn" onclick="saveQA()">Сохранить Вопрос-Ответ</button>
+            </div>
+        </div>
+        
+        <input type="text" id="searchInput" class="form-control mb-3" placeholder="Поиск по чанкам..." oninput="filterChunks()">
+        <div id="chunksList"></div>
+    </div>
+</div>
+
+<script>
+    let currentDocId = null;
+    let selectedChunk = null;
+    let allChunks = [];
+
+    fetch('/api/analysts').then(r => r.json()).then(data => {
+        const select = document.getElementById('analystSelect');
+        data.forEach(a => select.appendChild(new Option(a.name, a.id)));
+    });
+
+    function loadDocuments() {
+        const aid = document.getElementById('analystSelect').value;
+        if(!aid) return;
+        document.getElementById('mainWorkspace').style.display = 'flex';
+        
+        fetch(`/api/documents/${aid}`).then(r => r.json()).then(docs => {
+            const list = document.getElementById('docList');
+            list.innerHTML = docs.map(d => 
+                `<div class="p-2 border-bottom text-${d.status === 'Готово' ? 'success' : 'dark'}" style="cursor:pointer;" onclick="openDoc(${d.id}, '${d.filename}')">
+                    <strong>${d.filename}</strong> <br><small>Вопросов: ${d.qa_count}/2</small>
+                </div>`
+            ).join('');
+        });
+    }
+
+    function openDoc(docId, filename) {
+        currentDocId = docId;
+        document.getElementById('pdfViewer').src = `/docs/${filename}`;
+        
+        fetch(`/api/document/${docId}/chunks`).then(r => r.json()).then(chunks => {
+            allChunks = chunks;
+            renderChunks(chunks);
+        });
+        checkQACount();
+    }
+
+    function renderChunks(chunks, keyword = '') {
+        const list = document.getElementById('chunksList');
+        list.innerHTML = chunks.map(c => {
+            let text = c.text;
+            if(keyword) {
+                const re = new RegExp(`(${keyword})`, 'gi');
+                text = text.replace(re, '<span class="highlight">$1</span>');
+            }
+            return `<div class="chunk" id="chunk-${c.id}" onclick="selectChunk(${c.id})">
+                <small class="text-muted">Start Index: ${c.start_index}</small>
+                <p class="mb-0">${text}</p>
+            </div>`;
+        }).join('');
+    }
+
+    function filterChunks() {
+        const q = document.getElementById('searchInput').value.toLowerCase();
+        const filtered = allChunks.filter(c => c.text.toLowerCase().includes(q));
+        renderChunks(filtered, q);
+    }
+
+    function selectChunk(id) {
+        document.querySelectorAll('.chunk').forEach(el => el.classList.remove('selected'));
+        document.getElementById(`chunk-${id}`).classList.add('selected');
+        selectedChunk = id;
+        document.getElementById('selectedChunkId').innerText = `ID: ${id}`;
+    }
+
+    function checkQACount() {
+        fetch(`/api/document/${currentDocId}/qa`).then(r => r.json()).then(qas => {
+            const left = 2 - qas.length;
+            document.getElementById('qLeft').innerText = left;
+            
+            if (left <= 0) {
+                document.getElementById('qaCard').classList.add('disabled-card');
+                document.getElementById('saveBtn').disabled = true;
+            } else {
+                document.getElementById('qaCard').classList.remove('disabled-card');
+                document.getElementById('saveBtn').disabled = false;
+            }
+        });
+    }
+
+    function saveQA() {
+        const q = document.getElementById('questionInput').value;
+        const kw = document.getElementById('keywordInput').value;
+        
+        if(!q || !kw || !selectedChunk) return alert("Заполните вопрос, фразу и выберите чанк!");
+        
+        fetch('/api/qa', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ document_id: currentDocId, question: q, chunk_id: selectedChunk, key_phrase: kw })
+        }).then(r => r.json()).then(res => {
+            if(res.detail) alert(res.detail);
+            else {
+                document.getElementById('questionInput').value = '';
+                document.getElementById('keywordInput').value = '';
+                
+                // Сброс выделения
+                document.querySelectorAll('.chunk').forEach(el => el.classList.remove('selected'));
+                selectedChunk = null;
+                document.getElementById('selectedChunkId').innerText = 'Не выбран';
+                
+                checkQACount();
+                loadDocuments(); 
+            }
+        });
+    }
+</script>
+</body>
+</html>
