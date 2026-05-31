@@ -2,86 +2,202 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>Разметка RAG</title>
+    <title>Платформа RAG-Бенчмарков</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
-        .split { height: 90vh; }
-        .scrollable { height: 100%; overflow-y: auto; }
-        .chunk { cursor: pointer; transition: 0.2s; border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; }
-        .chunk:hover { background-color: #f8f9fa; }
-        .chunk.selected { background-color: #e2e3e5; border-color: #0d6efd; border-width: 2px; box-shadow: 0 0 5px rgba(13,110,253,0.5); }
-        .highlight { background-color: yellow; font-weight: bold; }
-        .disabled-card { opacity: 0.6; pointer-events: none; }
+        body { background-color: #f8f9fa; height: 100vh; overflow: hidden; }
+        .sidebar { background-color: #212529; color: white; height: 100vh; padding-top: 20px; }
+        .sidebar a { color: #adb5bd; text-decoration: none; padding: 10px 20px; display: block; border-left: 3px solid transparent; }
+        .sidebar a:hover, .sidebar a.active { color: white; background-color: #343a40; border-left-color: #0d6efd; }
+        
+        .main-content { height: 100vh; display: flex; flex-direction: column; }
+        .workspace { flex-grow: 1; overflow: hidden; display: flex; }
+        .scrollable { height: 100%; overflow-y: auto; padding: 15px; }
+        
+        .doc-item { cursor: pointer; transition: 0.2s; border-left: 4px solid transparent; }
+        .doc-item:hover { background-color: #e9ecef; }
+        .doc-item.active { background-color: #e9ecef; border-left-color: #0d6efd; }
+        
+        .chunk { cursor: pointer; border: 1px solid #dee2e6; padding: 12px; margin-bottom: 12px; border-radius: 8px; background: white; transition: 0.2s; }
+        .chunk:hover { border-color: #adb5bd; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .chunk.selected-high { border: 2px solid #198754; background-color: #d1e7dd; }
+        .chunk.selected-low { border: 2px solid #0dcaf0; background-color: #cff4fc; }
+        
+        .highlight { background-color: #ffeeba; font-weight: bold; border-radius: 3px; padding: 0 2px; }
+        
+        #loginOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f8f9fa; z-index: 9999; display: flex; justify-content: center; align-items: center; }
     </style>
 </head>
-<body class="container-fluid py-3">
+<body>
 
-<div class="row mb-3">
-    <div class="col-3">
-        <select id="analystSelect" class="form-select" onchange="loadDocuments()">
-            <option value="">-- Выберите аналитика --</option>
-        </select>
+<div id="loginOverlay">
+    <div class="card shadow-sm" style="width: 350px;">
+        <div class="card-body">
+            <h4 class="text-center mb-4"><i class="bi bi-robot text-primary"></i> RAG Bench</h4>
+            <div class="mb-3">
+                <label>Логин</label>
+                <input type="text" id="username" class="form-control" value="sasha">
+            </div>
+            <div class="mb-4">
+                <label>Пароль</label>
+                <input type="password" id="password" class="form-control" value="123">
+            </div>
+            <button class="btn btn-primary w-100" onclick="login()">Войти</button>
+        </div>
     </div>
-    <div class="col-6"><h4>RAG Разметка датасета</h4></div>
 </div>
 
-<div class="row split" id="mainWorkspace" style="display: none;">
-    <div class="col-2 scrollable border-end" id="docList"></div>
-    
-    <div class="col-4 scrollable border-end">
-        <iframe id="pdfViewer" style="width: 100%; height: 100%;"></iframe>
+<div class="row g-0 h-100">
+    <div class="col-auto sidebar" style="width: 250px;">
+        <h5 class="px-3 mb-4 text-white"><i class="bi bi-robot"></i> RAG Bench</h5>
+        <a href="#" class="active"><i class="bi bi-pencil-square me-2"></i> Разметка данных</a>
+        <a href="#" class="text-muted" onclick="alert('Модуль в разработке')"><i class="bi bi-speedometer2 me-2"></i> Запуск бенчмарков</a>
+        <a href="#" class="text-muted" onclick="alert('Модуль в разработке')"><i class="bi bi-gear me-2"></i> Конфиг эмбеддеров</a>
+        <div class="mt-auto position-absolute bottom-0 w-100 p-3">
+            <button class="btn btn-sm btn-outline-secondary w-100" onclick="logout()">Выйти</button>
+        </div>
     </div>
-    
-    <div class="col-6 scrollable">
-        <div class="card mb-3" id="qaCard">
-            <div class="card-header bg-primary text-white">Добавить вопрос (осталось: <span id="qLeft">2</span>/2)</div>
-            <div class="card-body">
-                <input type="text" id="questionInput" class="form-control mb-2" placeholder="Что спрашивает пользователь?">
-                <input type="text" id="keywordInput" class="form-control mb-2" placeholder="Ключевая фраза (для тестов, copy-paste из текста)">
-                <div class="text-muted small mb-2">Выбранный чанк: <span id="selectedChunkId" class="fw-bold text-primary">Не выбран</span></div>
-                <button class="btn btn-success" id="saveBtn" onclick="saveQA()">Сохранить Вопрос-Ответ</button>
+
+    <div class="col main-content" id="appContent" style="display: none;">
+        <div class="workspace">
+            <div class="col-2 border-end bg-white scrollable" id="docList"></div>
+            
+            <div class="col-5 border-end scrollable p-0 bg-light">
+                <div class="p-2 border-bottom bg-white d-flex justify-content-between align-items-center">
+                    <h6 class="m-0 text-truncate" id="currentDocTitle">Документ не выбран</h6>
+                    <button class="btn btn-sm btn-outline-success d-none" id="markDoneBtn" onclick="toggleDocComplete()">
+                        <i class="bi bi-check2-circle"></i> Завершить документ
+                    </button>
+                </div>
+                <iframe id="pdfViewer" style="width: 100%; height: calc(100% - 40px); border: none;"></iframe>
+            </div>
+            
+            <div class="col-5 scrollable bg-white">
+                <div class="card shadow-sm mb-4">
+                    <div class="card-header bg-white py-3">
+                        <h6 class="m-0 text-primary fw-bold"><i class="bi bi-plus-circle me-1"></i> Новый вопрос-ответ</h6>
+                    </div>
+                    <div class="card-body">
+                        <textarea id="questionInput" class="form-control mb-3" rows="2" placeholder="Что спрашивает пользователь?"></textarea>
+                        <input type="text" id="keywordInput" class="form-control mb-3" placeholder="Ключевая фраза (copy-paste из текста)">
+                        
+                        <div class="mb-3 border rounded p-2 bg-light">
+                            <small class="text-muted fw-bold d-block mb-2">Выбранные чанки:</small>
+                            <div id="selectedChunksBadgeList" class="d-flex flex-wrap gap-1">
+                                <span class="text-muted small">Кликните по чанку ниже, чтобы выбрать</span>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-primary w-100" onclick="saveQA()">Сохранить в датасет</button>
+                    </div>
+                </div>
+                
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="m-0">Текст документа (Чанки)</h6>
+                </div>
+                <input type="text" id="searchInput" class="form-control form-control-sm mb-3" placeholder="Поиск по тексту..." oninput="filterChunks()">
+                <div id="chunksList"></div>
             </div>
         </div>
-        
-        <input type="text" id="searchInput" class="form-control mb-3" placeholder="Поиск по чанкам..." oninput="filterChunks()">
-        <div id="chunksList"></div>
     </div>
 </div>
 
 <script>
+    let token = localStorage.getItem('token');
     let currentDocId = null;
-    let selectedChunk = null;
     let allChunks = [];
+    let selectedChunks = {}; // Format: { chunk_id: relevance_score (1 or 2) }
 
-    fetch('/api/analysts').then(r => r.json()).then(data => {
-        const select = document.getElementById('analystSelect');
-        data.forEach(a => select.appendChild(new Option(a.name, a.id)));
-    });
-
-    function loadDocuments() {
-        const aid = document.getElementById('analystSelect').value;
-        if(!aid) return;
-        document.getElementById('mainWorkspace').style.display = 'flex';
-        
-        fetch(`/api/documents/${aid}`).then(r => r.json()).then(docs => {
-            const list = document.getElementById('docList');
-            list.innerHTML = docs.map(d => 
-                `<div class="p-2 border-bottom text-${d.status === 'Готово' ? 'success' : 'dark'}" style="cursor:pointer;" onclick="openDoc(${d.id}, '${d.filename}')">
-                    <strong>${d.filename}</strong> <br><small>Вопросов: ${d.qa_count}/2</small>
-                </div>`
-            ).join('');
-        });
+    // --- Auth Logic ---
+    if (token) {
+        document.getElementById('loginOverlay').style.display = 'none';
+        document.getElementById('appContent').style.display = 'flex';
+        loadDocuments();
     }
 
-    function openDoc(docId, filename) {
+    async function login() {
+        const u = document.getElementById('username').value;
+        const p = document.getElementById('password').value;
+        const fd = new FormData();
+        fd.append('username', u); fd.append('password', p);
+        
+        const res = await fetch('/api/token', { method: 'POST', body: fd });
+        if (res.ok) {
+            const data = await res.json();
+            localStorage.setItem('token', data.access_token);
+            token = data.access_token;
+            document.getElementById('loginOverlay').style.display = 'none';
+            document.getElementById('appContent').style.display = 'flex';
+            loadDocuments();
+        } else {
+            alert('Ошибка авторизации');
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('token');
+        location.reload();
+    }
+
+    async function authFetch(url, options = {}) {
+        options.headers = { ...options.headers, 'Authorization': `Bearer ${token}` };
+        const res = await fetch(url, options);
+        if (res.status === 401) logout();
+        return res;
+    }
+
+    // --- Core Logic ---
+    async function loadDocuments() {
+        const res = await authFetch('/api/documents');
+        const docs = await res.json();
+        
+        const list = document.getElementById('docList');
+        list.innerHTML = docs.map(d => `
+            <div class="p-3 border-bottom doc-item ${d.status === 'Готово' ? 'bg-light text-success' : ''}" 
+                 id="doc-item-${d.id}" onclick="openDoc(${d.id}, '${d.filename}', '${d.status}')">
+                <div class="fw-bold mb-1" style="font-size: 0.9rem; word-break: break-all;">
+                    ${d.status === 'Готово' ? '<i class="bi bi-check-circle-fill"></i> ' : ''}${d.filename}
+                </div>
+                <small class="text-muted">Собрано вопросов: <span class="badge bg-secondary">${d.qa_count}</span></small>
+            </div>
+        `).join('');
+    }
+
+    async function openDoc(docId, filename, status) {
+        document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
+        document.getElementById(`doc-item-${docId}`).classList.add('active');
+        
         currentDocId = docId;
+        document.getElementById('currentDocTitle').innerText = filename;
         document.getElementById('pdfViewer').src = `/docs/${filename}`;
         
-        fetch(`/api/document/${docId}/chunks`).then(r => r.json()).then(chunks => {
-            allChunks = chunks;
-            renderChunks(chunks);
-        });
-        checkQACount();
+        const btn = document.getElementById('markDoneBtn');
+        btn.classList.remove('d-none');
+        btn.innerHTML = status === 'Готово' ? '<i class="bi bi-arrow-counterclockwise"></i> Вернуть в работу' : '<i class="bi bi-check2-circle"></i> Завершить документ';
+        btn.className = status === 'Готово' ? 'btn btn-sm btn-outline-warning' : 'btn btn-sm btn-outline-success';
+        
+        selectedChunks = {}; // Reset selections
+        updateSelectionBadges();
+        
+        const res = await authFetch(`/api/document/${docId}/chunks`);
+        allChunks = await res.json();
+        renderChunks(allChunks);
+    }
+
+    async function toggleDocComplete() {
+        if(!currentDocId) return;
+        await authFetch(`/api/document/${currentDocId}/complete`, { method: 'POST' });
+        loadDocuments();
+        // Simulation locally to update button
+        const btn = document.getElementById('markDoneBtn');
+        if(btn.innerText.includes('Завершить')) {
+            btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Вернуть в работу';
+            btn.className = 'btn btn-sm btn-outline-warning';
+        } else {
+            btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить документ';
+            btn.className = 'btn btn-sm btn-outline-success';
+        }
     }
 
     function renderChunks(chunks, keyword = '') {
@@ -92,10 +208,49 @@
                 const re = new RegExp(`(${keyword})`, 'gi');
                 text = text.replace(re, '<span class="highlight">$1</span>');
             }
-            return `<div class="chunk" id="chunk-${c.id}" onclick="selectChunk(${c.id})">
-                <small class="text-muted">Start Index: ${c.start_index}</small>
-                <p class="mb-0">${text}</p>
+            
+            // Check state
+            let extraClass = '';
+            if(selectedChunks[c.id] === 2) extraClass = 'selected-high';
+            else if(selectedChunks[c.id] === 1) extraClass = 'selected-low';
+            
+            return `
+            <div class="chunk ${extraClass}" id="chunk-${c.id}">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <small class="text-muted">Idx: ${c.start_index} | ID: ${c.id}</small>
+                    <div class="btn-group btn-group-sm">
+                        <button class="btn btn-outline-success ${selectedChunks[c.id] === 2 ? 'active' : ''}" onclick="toggleChunk(${c.id}, 2)">Основа</button>
+                        <button class="btn btn-outline-info ${selectedChunks[c.id] === 1 ? 'active' : ''}" onclick="toggleChunk(${c.id}, 1)">Контекст</button>
+                    </div>
+                </div>
+                <p class="mb-0" style="font-size: 0.9rem;">${text}</p>
             </div>`;
+        }).join('');
+    }
+
+    function toggleChunk(id, relevance) {
+        if(selectedChunks[id] === relevance) {
+            delete selectedChunks[id]; // Toggle off
+        } else {
+            selectedChunks[id] = relevance; // Set or switch relevance
+        }
+        filterChunks(); // Re-render to update UI
+        updateSelectionBadges();
+    }
+
+    function updateSelectionBadges() {
+        const container = document.getElementById('selectedChunksBadgeList');
+        const keys = Object.keys(selectedChunks);
+        if(keys.length === 0) {
+            container.innerHTML = '<span class="text-muted small">Кликните по кнопкам на чанке ниже, чтобы выбрать</span>';
+            return;
+        }
+        
+        container.innerHTML = keys.map(id => {
+            const rel = selectedChunks[id];
+            const cls = rel === 2 ? 'bg-success' : 'bg-info text-dark';
+            const label = rel === 2 ? 'Основа' : 'Контекст';
+            return `<span class="badge ${cls}">ID: ${id} (${label})</span>`;
         }).join('');
     }
 
@@ -105,53 +260,31 @@
         renderChunks(filtered, q);
     }
 
-    function selectChunk(id) {
-        document.querySelectorAll('.chunk').forEach(el => el.classList.remove('selected'));
-        document.getElementById(`chunk-${id}`).classList.add('selected');
-        selectedChunk = id;
-        document.getElementById('selectedChunkId').innerText = `ID: ${id}`;
-    }
-
-    function checkQACount() {
-        fetch(`/api/document/${currentDocId}/qa`).then(r => r.json()).then(qas => {
-            const left = 2 - qas.length;
-            document.getElementById('qLeft').innerText = left;
-            
-            if (left <= 0) {
-                document.getElementById('qaCard').classList.add('disabled-card');
-                document.getElementById('saveBtn').disabled = true;
-            } else {
-                document.getElementById('qaCard').classList.remove('disabled-card');
-                document.getElementById('saveBtn').disabled = false;
-            }
-        });
-    }
-
-    function saveQA() {
+    async function saveQA() {
         const q = document.getElementById('questionInput').value;
         const kw = document.getElementById('keywordInput').value;
         
-        if(!q || !kw || !selectedChunk) return alert("Заполните вопрос, фразу и выберите чанк!");
+        const chunksArr = Object.entries(selectedChunks).map(([id, rel]) => ({ chunk_id: parseInt(id), relevance: rel }));
         
-        fetch('/api/qa', {
+        if(!q || !kw || chunksArr.length === 0) return alert("Заполните вопрос, фразу и выберите хотя бы один чанк!");
+        
+        const res = await authFetch('/api/qa', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ document_id: currentDocId, question: q, chunk_id: selectedChunk, key_phrase: kw })
-        }).then(r => r.json()).then(res => {
-            if(res.detail) alert(res.detail);
-            else {
-                document.getElementById('questionInput').value = '';
-                document.getElementById('keywordInput').value = '';
-                
-                // Сброс выделения
-                document.querySelectorAll('.chunk').forEach(el => el.classList.remove('selected'));
-                selectedChunk = null;
-                document.getElementById('selectedChunkId').innerText = 'Не выбран';
-                
-                checkQACount();
-                loadDocuments(); 
-            }
+            body: JSON.stringify({ document_id: currentDocId, question: q, key_phrase: kw, relevant_chunks: chunksArr })
         });
+        
+        const data = await res.json();
+        if(res.ok) {
+            document.getElementById('questionInput').value = '';
+            document.getElementById('keywordInput').value = '';
+            selectedChunks = {};
+            updateSelectionBadges();
+            filterChunks();
+            loadDocuments(); 
+        } else {
+            alert(data.detail || "Ошибка сохранения");
+        }
     }
 </script>
 </body>
