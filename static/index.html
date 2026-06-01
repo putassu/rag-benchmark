@@ -320,8 +320,10 @@
         });
         
         if(res.ok) {
-            document.getElementById('questionInput').value = ''; document.getElementById('keywordInput').value = '';
-            selectedChunks = {}; updateSelectionBadges();
+            document.getElementById('questionInput').value = ''; 
+            document.getElementById('keywordInput').value = '';
+            selectedChunks = {}; 
+            updateSelectionBadges();
             
             // Сбрасываем визуал чанков без полной перерисовки
             document.querySelectorAll('.chunk-card').forEach(card => {
@@ -332,9 +334,24 @@
             loadDocuments(); 
             const btn = document.querySelector('.sticky-header .btn-primary');
             const orig = btn.innerHTML;
-            btn.innerHTML = '<i class="bi bi-check-lg"></i> Сохранено!'; btn.classList.replace('btn-primary', 'btn-success');
-            setTimeout(() => { btn.innerHTML = orig; btn.classList.replace('btn-success', 'btn-primary'); }, 1500);
-        } else { alert((await res.json()).detail || "Ошибка сохранения"); }
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Сохранено!'; 
+            btn.classList.replace('btn-primary', 'btn-success');
+            setTimeout(() => { 
+                btn.innerHTML = orig; 
+                btn.classList.replace('btn-success', 'btn-primary'); 
+            }, 1500);
+        } else { 
+            // Умный парсинг ошибок от бэкенда
+            const errorData = await res.json();
+            if (Array.isArray(errorData.detail)) {
+                // Если это 422 ошибка FastAPI, detail - это массив объектов
+                const messages = errorData.detail.map(err => `- Поле [${err.loc.join(' > ')}]: ${err.msg}`).join('\n');
+                alert("⚠️ Ошибка валидации данных бэкендом:\n" + messages);
+            } else {
+                // Если это обычная строка (например, 400 или 403 ошибка)
+                alert("⚠️ " + (errorData.detail || "Неизвестная ошибка сохранения"));
+            }
+        }s
     }
 </script>
 </body>
