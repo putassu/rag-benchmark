@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from passlib.context import CryptContext
+import bcrypt
 from jose import JWTError, jwt
 import database as db
 import config
@@ -18,7 +18,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-for-rag-pilot")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Неделя
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
 app = FastAPI(title="RAG Annotation Tool")
@@ -41,11 +41,18 @@ def get_db():
         session.close()
 
 # --- Auth Utilities ---
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    # bcrypt работает только с байтами, поэтому переводим строки в utf-8
+    return bcrypt.checkpw(
+        plain_password.encode('utf-8'), 
+        hashed_password.encode('utf-8')
+    )
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    # Генерируем соль и хешируем пароль
+    hashed_bytes = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+    # Возвращаем строку, так как в SQLAlchemy (модель User) у нас Column(String)
+    return hashed_bytes.decode('utf-8')
 
 def create_access_token(data: dict):
     to_encode = data.copy()
