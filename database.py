@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, Column, Integer, String, ForeignKey, Text, JSON, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
-import config
 
 engine = create_engine("sqlite:///dataset.db", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -20,19 +19,10 @@ class Document(Base):
     openweb_id = Column(String, unique=True, index=True)
     collection_name = Column(String)
     assignee_id = Column(Integer, ForeignKey("users.id"))
-    is_completed = Column(Boolean, default=False) # Статус готовности документа
+    is_completed = Column(Boolean, default=False)
     
-    chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
+    # Связь с чанками удалена! Чанки теперь только в Qdrant.
     qa_pairs = relationship("QAPair", back_populates="document", cascade="all, delete-orphan")
-
-class Chunk(Base):
-    __tablename__ = "chunks"
-    id = Column(Integer, primary_key=True, index=True)
-    document_id = Column(Integer, ForeignKey("documents.id"))
-    text = Column(Text)
-    start_index = Column(Integer)
-    
-    document = relationship("Document", back_populates="chunks")
 
 class QAPair(Base):
     __tablename__ = "qa_pairs"
@@ -40,9 +30,7 @@ class QAPair(Base):
     document_id = Column(Integer, ForeignKey("documents.id"))
     question = Column(Text)
     key_phrase = Column(Text) 
-    
-    # Храним список [{"chunk_id": 1, "relevance": 2}, {"chunk_id": 5, "relevance": 1}]
-    relevant_chunks = Column(JSON) 
+    relevant_chunks = Column(JSON) # [{"chunk_id": "uuid-string", "relevance": 2}]
     
     document = relationship("Document", back_populates="qa_pairs")
 

@@ -12,12 +12,17 @@ import bcrypt
 from jose import JWTError, jwt
 import database as db
 import config
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qmodels
+from typing import List, Dict, Any
 
 # Настройки безопасности (в продакшене вынести в config)
 SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-for-rag-pilot")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # Неделя
 
+qdrant = QdrantClient(url=config.QDRANT_URL, api_key=config.QDRANT_API_KEY)
+COLLECTION_NAME = "rag_benchmark"
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/token")
 
@@ -32,6 +37,12 @@ os.makedirs(config.DOCS_DIR, exist_ok=True)
 os.makedirs("static", exist_ok=True)
 app.mount("/docs", StaticFiles(directory=config.DOCS_DIR), name="docs")
 app.mount("/static", StaticFiles(directory="static"), name="static")
+
+class QAPairCreate(BaseModel):
+    document_id: int
+    question: str
+    key_phrase: str
+    relevant_chunks: List[Dict[str, Any]] # [{"chunk_id": "string-uuid", "relevance": 2}]
 
 def get_db():
     session = db.SessionLocal()
@@ -129,8 +140,37 @@ def complete_document(doc_id: int, current_user: db.User = Depends(get_current_u
 
 @app.get("/api/document/{doc_id}/chunks")
 def get_chunks(doc_id: int, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):
-    chunks = session.query(db.Chunk).filter(db.Chunk.document_id == doc_id).order_by(db.Chunk.start_index).all()
-    return [{"id": c.id, "text": c.text, "start_index": c.start_index} for c in chunks]
+    # 1. Проверяем, есть ли доступ у юзера к документу
+    doc = session.query(db.Document).filter(db.Document.id == doc_id, db.Document.assignee_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=403, detail="Доступ запрещен или документ не найден")
+        
+    # 2. Идем напрямую в Qdrant и ищем все чанки с payload, где doc_id == нашему
+    try:
+        records, _ = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qmodels.Filter(
+                must=[qmodels.FieldCondition(key="doc_id", match=qmodels.MatchValue(value=doc_id))]
+            ),
+            limit=2000, # С запасом на очень длинные документы
+            with_payload=True,
+            with_vectors=False # Сами векторы на фронте нам не нужны, только текст
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка обращения к Qdrant: {str(e)}")
+
+    # 3. Формируем ответ
+    chunks = []
+    for record in records:
+        chunks.append({
+            "id": record.id, # ID из Qdrant (string UUID)
+            "text": record.payload.get("text", ""),
+            "start_index": record.payload.get("start_index", 0)
+        })
+        
+    # 4. Qdrant не гарантирует порядок при scroll, поэтому сортируем сами
+    chunks.sort(key=lambda x: x["start_index"])
+    return chunks
 
 @app.post("/api/qa")
 def save_qa(qa: QAPairCreate, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):

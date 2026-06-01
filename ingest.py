@@ -1,10 +1,11 @@
 import os
 import itertools
 import requests
+import uuid
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
-from config import logger, OPENWEB_URL, OPENWEB_API_KEY, QDRANT_URL, QDRANT_API_KEY, DOCS_DIR, ANALYSTS
-from database import SessionLocal, Document, Chunk
+from config import logger, OPENWEB_URL, OPENWEB_API_KEY, QDRANT_URL, QDRANT_API_KEY, DOCS_DIR
+from database import SessionLocal, Document, User
 
 qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 COLLECTION_NAME = "rag_benchmark"
@@ -14,7 +15,7 @@ def init_qdrant():
         qdrant.get_collection(COLLECTION_NAME)
         logger.info(f"Коллекция {COLLECTION_NAME} уже существует.")
     except Exception:
-        logger.info("Создаем коллекцию в Qdrant (fake vectors size=1)...")
+        logger.info("Создаем коллекцию в Qdrant...")
         qdrant.recreate_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=qmodels.VectorParams(size=1, distance=qmodels.Distance.COSINE)
@@ -87,11 +88,17 @@ def ingest_all():
     init_qdrant()
     db = SessionLocal()
     
+    # 1. Забираем реальных пользователей из БД
+    users = db.query(User).all()
+    if not users:
+        logger.error("В базе нет пользователей! Сначала запустите app.py (uvicorn), чтобы отработал lifespan.")
+        db.close()
+        return
+        
     os.makedirs(DOCS_DIR, exist_ok=True)
     files = [f for f in os.listdir(DOCS_DIR) if os.path.isfile(os.path.join(DOCS_DIR, f))]
     
-    # Строго поровну распределяем файлы
-    analysts_cycle = itertools.cycle(ANALYSTS)
+    users_cycle = itertools.cycle(users)
     
     for filename in files:
         filepath = os.path.join(DOCS_DIR, filename)
@@ -102,42 +109,41 @@ def ingest_all():
             chunks = get_chunks_from_openweb(collection_name)
             
             if not test_chunks_fidelity(chunks, filename):
-                logger.warning(f"Файл {filename} пропущен из-за ошибок чанкирования.")
                 continue
                 
-            assignee = next(analysts_cycle)
+            assignee = next(users_cycle)
             
+            # 2. Запись документа в SQLite (создаем задачу на разметку)
             db_doc = Document(
                 filename=filename,
                 openweb_id=openweb_id,
                 collection_name=collection_name,
-                assignee_id=assignee["id"]
+                assignee_id=assignee.id
             )
             db.add(db_doc)
             db.commit()
             db.refresh(db_doc)
             
+            # 3. Отправка чанков ТОЛЬКО в Qdrant
             points = []
-            for idx, chunk in enumerate(chunks):
-                db_chunk = Chunk(
-                    document_id=db_doc.id,
-                    text=chunk["text"],
-                    start_index=chunk["meta"]["start_index"]
-                )
-                db.add(db_chunk)
-                
+            for chunk in chunks:
+                chunk_id = uuid.uuid4().hex # Строковый ID для Qdrant
                 points.append(qmodels.PointStruct(
-                    id=db_doc.id * 10000 + idx, 
+                    id=chunk_id, 
                     vector=[0.0],
-                    payload={"doc_id": openweb_id, "text": chunk["text"], "start_index": chunk["meta"]["start_index"]}
+                    payload={
+                        "doc_id": db_doc.id, # Привязка к документу в SQLite
+                        "openweb_id": openweb_id, 
+                        "text": chunk["text"], 
+                        "start_index": chunk["meta"]["start_index"]
+                    }
                 ))
                 
-            db.commit()
             qdrant.upsert(collection_name=COLLECTION_NAME, points=points)
-            logger.info(f"Успешно! Документ {filename} назначен на: {assignee['name']}. Чанков: {len(chunks)}")
+            logger.info(f"Успешно! Документ '{filename}' назначен на юзера '{assignee.username}'. Чанков в Qdrant: {len(chunks)}")
             
         except Exception as e:
-            logger.error(f"Критическая ошибка при обработке {filename}: {str(e)}")
+            logger.error(f"Ошибка при обработке {filename}: {str(e)}")
             db.rollback()
             
     db.close()
