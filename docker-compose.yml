@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  rag-annotation-app:
+    build: .
+    container_name: rag-annotation-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # Формат: ./локальная_папка_на_сервере:/папка_в_контейнере
+      - ./server_data:/app/data   # Здесь будет лежать dataset.db
+      - ./server_docs:/app/docs   # Здесь будут лежать PDF файлы
+    environment:
+      - LOG_LEVEL=INFO
+      - QDRANT_URL=${QDRANT_URL}
+      - OPENWEB_URL=${OPENWEB_URL}
+      - OPENWEB_API_KEY=${OPENWEB_API_KEY}

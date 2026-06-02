@@ -6,6 +6,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from config import logger, OPENWEB_URL, OPENWEB_API_KEY, QDRANT_URL, QDRANT_API_KEY, DOCS_DIR
 from database import SessionLocal, Document, User
+import mimetypes
 
 qdrant = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 COLLECTION_NAME = "rag_benchmark"
@@ -26,12 +27,24 @@ def upload_to_openweb(filepath):
     url = f"{OPENWEB_URL}/api/v1/files/?process=true&internal=false"
     headers = {"Authorization": f"Bearer {OPENWEB_API_KEY}"}
     
+    # 1. Динамически определяем MIME-тип файла
+    mime_type, _ = mimetypes.guess_type(filepath)
+    
+    # 2. Если тип определить не удалось, ставим универсальный бинарный fallback
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+        
+    logger.debug(f"Определен MIME-тип: {mime_type} для файла {os.path.basename(filepath)}")
+    
     with open(filepath, "rb") as f:
         response = requests.post(
-            url, headers=headers,
-            files={"file": (os.path.basename(filepath), f, "application/pdf")},
+            url, 
+            headers=headers,
+            # 3. Передаем динамический mime_type вместо жесткого "application/pdf"
+            files={"file": (os.path.basename(filepath), f, mime_type)},
             verify=False
         )
+        
     response.raise_for_status()
     data = response.json()
     return data["id"], data["meta"]["collection_name"]

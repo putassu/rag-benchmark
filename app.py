@@ -15,6 +15,7 @@ import config
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from typing import List, Dict, Any
+from fastapi.responses import FileResponse
 
 # Настройки безопасности (в продакшене вынести в config)
 SECRET_KEY = os.getenv("SECRET_KEY", "super-secret-key-for-rag-pilot")
@@ -205,3 +206,21 @@ def reset_document_qa(doc_id: int, current_user: db.User = Depends(get_current_u
     
     session.commit()
     return {"status": "success", "deleted_pairs": deleted_count, "message": "Разметка документа полностью очищена"}
+
+# Эндпоинт для выгрузки базы данных
+@app.get("/api/admin/export-db")
+def export_database(current_user: db.User = Depends(get_current_user)):
+    # Защита: скачивать могут только админы (например, 'sasha')
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Доступ только для администраторов")
+    
+    # Путь должен совпадать с тем, где реально лежит файл в контейнере
+    db_path = "data/dataset.db" 
+    if not os.path.exists(db_path):
+        raise HTTPException(status_code=404, detail="Файл базы данных не найден")
+        
+    return FileResponse(
+        path=db_path, 
+        filename=f"rag_dataset_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
+        media_type="application/octet-stream"
+    )
