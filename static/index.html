@@ -110,10 +110,15 @@
     <div id="pane-pdf" class="split-pane border-end">
         <div id="pdf-container">
             <div class="p-2 border-bottom bg-white d-flex justify-content-between align-items-center">
-                <div class="text-truncate fw-bold text-secondary ps-2" id="currentDocTitle" style="max-width: 70%;">Документ не выбран</div>
-                <button class="btn btn-sm btn-outline-success d-none shadow-sm" id="markDoneBtn" onclick="toggleDocComplete()">
-                    <i class="bi bi-check2-circle"></i> Завершить
-                </button>
+                <div class="text-truncate fw-bold text-secondary ps-2" id="currentDocTitle" style="max-width: 60%;">Документ не выбран</div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger d-none shadow-sm" id="resetMarkupBtn" onclick="resetMarkup()">
+                        <i class="bi bi-trash3"></i> Сбросить
+                    </button>
+                    <button class="btn btn-sm btn-outline-success d-none shadow-sm" id="markDoneBtn" onclick="toggleDocComplete()">
+                        <i class="bi bi-check2-circle"></i> Завершить
+                    </button>
+                </div>
             </div>
             <iframe id="pdfViewer"></iframe>
         </div>
@@ -211,7 +216,7 @@
         `).join('');
     }
 
-    async function openDoc(docId, filename, status) {
+async function openDoc(docId, filename, status) {
         document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
         document.getElementById(`doc-item-${docId}`).classList.add('active');
         
@@ -223,6 +228,9 @@
         btn.classList.remove('d-none');
         btn.innerHTML = status === 'Готово' ? '<i class="bi bi-arrow-counterclockwise"></i> Вернуть' : '<i class="bi bi-check2-circle"></i> Завершить';
         btn.className = status === 'Готово' ? 'btn btn-sm btn-outline-warning' : 'btn btn-sm btn-outline-success';
+        
+        // Показываем кнопку сброса
+        document.getElementById('resetMarkupBtn').classList.remove('d-none');
         
         selectedChunks = {}; updateSelectionBadges();
         document.getElementById('chunksList').innerHTML = '<div class="text-center mt-4"><div class="spinner-border text-primary"></div></div>';
@@ -305,6 +313,44 @@
     function filterChunks() {
         const q = document.getElementById('searchInput').value.toLowerCase();
         renderChunks(allChunks.filter(c => c.text.toLowerCase().includes(q)), q);
+    }
+
+    async function resetMarkup() {
+        if(!currentDocId) return;
+        
+        // Защита от случайного клика
+        const isConfirmed = confirm("⚠️ Вы уверены, что хотите безвозвратно удалить ВСЮ разметку (вопросы и выбранные чанки) для этого документа?");
+        if(!isConfirmed) return;
+        
+        const res = await authFetch(`/api/document/${currentDocId}/reset`, { method: 'DELETE' });
+        
+        if(res.ok) {
+            // Очищаем формы
+            document.getElementById('questionInput').value = ''; 
+            document.getElementById('keywordInput').value = '';
+            
+            // Сбрасываем выбранные чанки в памяти
+            selectedChunks = {}; 
+            updateSelectionBadges();
+            
+            // Визуально отжимаем все кнопки на чанках
+            document.querySelectorAll('.chunk-card').forEach(card => {
+                card.classList.remove('selected-high', 'selected-low');
+                card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
+            });
+            
+            // Обновляем список документов слева (чтобы сбросился счетчик Q&A и статус)
+            loadDocuments(); 
+            
+            // Возвращаем кнопку "Завершить" в исходное состояние, если она была желтой
+            const btn = document.getElementById('markDoneBtn');
+            btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить';
+            btn.className = 'btn btn-sm btn-outline-success';
+            
+        } else {
+            const errorData = await res.json();
+            alert("⚠️ Ошибка сброса: " + (errorData.detail || "Неизвестная ошибка"));
+        }
     }
 
     async function saveQA() {

@@ -189,3 +189,19 @@ def save_qa(qa: QAPairCreate, current_user: db.User = Depends(get_current_user),
 def get_doc_qa(doc_id: int, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):
     qas = session.query(db.QAPair).filter(db.QAPair.document_id == doc_id).all()
     return qas
+
+@app.delete("/api/document/{doc_id}/reset")
+def reset_document_qa(doc_id: int, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):
+    # 1. Проверяем права (документ должен быть назначен на этого юзера)
+    doc = session.query(db.Document).filter(db.Document.id == doc_id, db.Document.assignee_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=403, detail="Доступ запрещен или документ не найден")
+    
+    # 2. Удаляем все вопросы-ответы для этого документа
+    deleted_count = session.query(db.QAPair).filter(db.QAPair.document_id == doc_id).delete()
+    
+    # 3. Снимаем статус "Готово"
+    doc.is_completed = False
+    
+    session.commit()
+    return {"status": "success", "deleted_pairs": deleted_count, "message": "Разметка документа полностью очищена"}
