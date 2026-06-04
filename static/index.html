@@ -24,7 +24,6 @@
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-        /* Фоллбэк сетка: если Split.js не загрузится, верстка всё равно не сломается */
         .split-wrapper { display: flex; flex-direction: row; height: 100vh; width: 100vw; }
         
         .split-pane { overflow-y: auto; overflow-x: hidden; background-color: white; height: 100%; }
@@ -78,11 +77,11 @@
             <h4 class="text-center mb-4 fw-bold"><i class="bi bi-robot text-primary"></i> RAG Bench</h4>
             <div class="mb-3">
                 <label class="form-label text-muted small fw-bold">Логин</label>
-                <input type="text" id="username" class="form-control form-control-lg" value="sasha">
+                <input type="text" id="username" class="form-control form-control-lg">
             </div>
             <div class="mb-4">
                 <label class="form-label text-muted small fw-bold">Пароль</label>
-                <input type="password" id="password" class="form-control form-control-lg" value="123">
+                <input type="password" id="password" class="form-control form-control-lg">
             </div>
             <button class="btn btn-primary btn-lg w-100 fw-bold" onclick="login()">Войти в платформу</button>
         </div>
@@ -125,20 +124,31 @@
     </div>
 
     <div id="pane-workspace" class="split-pane">
+        
         <div class="sticky-header">
-            <h6 class="text-primary fw-bold mb-3"><i class="bi bi-plus-circle me-2"></i>Новый Q&A</h6>
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="text-primary fw-bold m-0" id="formTitle"><i class="bi bi-plus-circle me-2"></i>Новый Q&A</h6>
+                <button class="btn btn-sm btn-outline-secondary d-none" id="cancelEditBtn" onclick="cancelEdit()">Отменить ред.</button>
+            </div>
+            
             <textarea id="questionInput" class="form-control mb-2" rows="2" placeholder="Что спрашивает пользователь?"></textarea>
-            <input type="text" id="keywordInput" class="form-control mb-3" placeholder="Ключевая фраза (для assert'ов)">
+            
             <div class="p-2 bg-light rounded border mb-3">
-                <div class="text-muted small fw-bold mb-2">Выбранные чанки:</div>
-                <div id="selectedChunksBadgeList" class="d-flex flex-wrap gap-1">
+                <div class="text-muted small fw-bold mb-2">Выбранные чанки и фразы:</div>
+                <div id="selectedChunksBadgeList" class="d-flex flex-column gap-2">
                     <span class="text-muted small">Кликните «Основа» или «Контекст» на чанке ниже</span>
                 </div>
             </div>
-            <button class="btn btn-primary w-100 fw-bold shadow-sm" onclick="saveQA()">Добавить в датасет</button>
+            
+            <button class="btn btn-primary w-100 fw-bold shadow-sm" id="saveQaBtn" onclick="saveQA()">Добавить в датасет</button>
         </div>
 
-        <div class="chunk-list">
+        <div id="savedQaContainer" class="p-3 bg-white border-bottom" style="display: none;">
+            <h6 class="fw-bold text-secondary mb-3"><i class="bi bi-collection"></i> Сохраненные пары (<span id="qaCountBadge">0</span>)</h6>
+            <div id="savedQaList" class="d-flex flex-column gap-2"></div>
+        </div>
+
+        <div class="chunk-list bg-light">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h6 class="m-0 fw-bold text-secondary">Текст документа</h6>
             </div>
@@ -154,7 +164,9 @@
     let token = localStorage.getItem('token');
     let currentDocId = null;
     let allChunks = [];
-    let selectedChunks = {}; 
+    let selectedChunks = {}; // { "uuid": { relevance: 2, key_phrases: "фраза1, фраза2" } }
+    let loadedQAs = []; 
+    let editingQaId = null; 
 
     if (token) {
         document.getElementById('loginOverlay').style.display = 'none';
@@ -176,7 +188,7 @@
             document.getElementById('appContent').style.display = 'flex';
             initSplitter();
             loadDocuments();
-        } else { alert('Ошибка авторизации.'); }
+        } else { alert('Ошибка авторизации. Проверьте логин и пароль.'); }
     }
 
     function logout() { localStorage.removeItem('token'); location.reload(); }
@@ -216,76 +228,197 @@
         `).join('');
     }
 
-async function openDoc(docId, filename, status) {
+    async function toggleDocComplete() {
+        if(!currentDocId) return;
+        await authFetch(`/api/document/${currentDocId}/complete`, { method: 'POST' });
+        loadDocuments();
+        
+        // Визуальное обновление кнопки
+        const btn = document.getElementById('markDoneBtn');
+        if(btn.innerText.includes('Завершить')) {
+            btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Вернуть';
+            btn.className = 'btn btn-sm btn-outline-warning';
+        } else {
+            btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить';
+            btn.className = 'btn btn-sm btn-outline-success';
+        }
+    }
+
+    async function resetMarkup() {
+        if(!currentDocId) return;
+        const isConfirmed = confirm("⚠️ Удалить ВСЮ разметку (вопросы и чанки) для этого документа?");
+        if(!isConfirmed) return;
+        
+        const res = await authFetch(`/api/document/${currentDocId}/reset`, { method: 'DELETE' });
+        if(res.ok) {
+            cancelEdit();
+            await loadSavedQAs();
+            loadDocuments(); 
+            
+            const btn = document.getElementById('markDoneBtn');
+            btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить';
+            btn.className = 'btn btn-sm btn-outline-success shadow-sm';
+        } else {
+            const err = await res.json();
+            alert("⚠️ Ошибка сброса: " + (err.detail || "Неизвестная ошибка"));
+        }
+    }
+
+    async function openDoc(docId, filename, status) {
         document.querySelectorAll('.doc-item').forEach(el => el.classList.remove('active'));
         document.getElementById(`doc-item-${docId}`).classList.add('active');
         
         currentDocId = docId;
         document.getElementById('currentDocTitle').innerText = filename;
         
-        // 1. Правильно кодируем URL (спасает от пробелов, скобок и кириллицы)
         const encodedFilename = encodeURIComponent(filename);
         const fileUrl = `/docs/${encodedFilename}`;
-        
-        // 2. Проверяем расширение файла
         const ext = filename.split('.').pop().toLowerCase();
         const supportedFormats = ['pdf', 'txt', 'png', 'jpg', 'jpeg'];
-        
         const pdfContainer = document.getElementById('pdfViewer');
         
-        // Создаем div-заглушку, если её еще нет
         let fallbackDiv = document.getElementById('noPreviewFallback');
         if (!fallbackDiv) {
             fallbackDiv = document.createElement('div');
             fallbackDiv.id = 'noPreviewFallback';
-            // Убрали d-flex из базовых классов, будем управлять им динамически
             fallbackDiv.className = 'flex-column justify-content-center align-items-center h-100 bg-light';
             pdfContainer.parentNode.insertBefore(fallbackDiv, pdfContainer);
         }
         
-        // 3. Умная маршрутизация отображения с переключением классов
         if (supportedFormats.includes(ext)) {
-            // Прячем плашку, показываем iframe
-            fallbackDiv.classList.add('d-none');
-            fallbackDiv.classList.remove('d-flex');
-            
-            pdfContainer.classList.remove('d-none');
-            pdfContainer.src = fileUrl;
+            fallbackDiv.classList.add('d-none'); fallbackDiv.classList.remove('d-flex');
+            pdfContainer.classList.remove('d-none'); pdfContainer.src = fileUrl;
         } else {
-            // Прячем iframe, показываем плашку
             pdfContainer.classList.add('d-none');
-            
-            fallbackDiv.classList.remove('d-none');
-            fallbackDiv.classList.add('d-flex');
+            fallbackDiv.classList.remove('d-none'); fallbackDiv.classList.add('d-flex');
             fallbackDiv.innerHTML = `
                 <i class="bi bi-file-earmark-word display-1 text-secondary mb-3"></i>
                 <h5 class="text-secondary">Предпросмотр недоступен</h5>
                 <p class="text-muted small">Браузер не поддерживает отображение файлов .${ext}</p>
                 <a href="${fileUrl}" class="btn btn-primary mt-2" target="_blank" download>
                     <i class="bi bi-download me-2"></i>Скачать оригинал
-                </a>
-            `;
+                </a>`;
         }
         
         const btn = document.getElementById('markDoneBtn');
         btn.classList.remove('d-none');
         btn.innerHTML = status === 'Готово' ? '<i class="bi bi-arrow-counterclockwise"></i> Вернуть' : '<i class="bi bi-check2-circle"></i> Завершить';
-        btn.className = status === 'Готово' ? 'btn btn-sm btn-outline-warning' : 'btn btn-sm btn-outline-success';
+        btn.className = status === 'Готово' ? 'btn btn-sm btn-outline-warning shadow-sm' : 'btn btn-sm btn-outline-success shadow-sm';
         
         document.getElementById('resetMarkupBtn').classList.remove('d-none');
         
-        selectedChunks = {}; updateSelectionBadges();
+        cancelEdit(); // Сброс режима редактирования
         document.getElementById('chunksList').innerHTML = '<div class="text-center mt-4"><div class="spinner-border text-primary"></div></div>';
         
         const res = await authFetch(`/api/document/${docId}/chunks`);
         allChunks = await res.json();
         renderChunks(allChunks);
+        await loadSavedQAs(); // Подгружаем сохраненную разметку
     }
 
-    async function toggleDocComplete() {
-        if(!currentDocId) return;
-        await authFetch(`/api/document/${currentDocId}/complete`, { method: 'POST' });
-        loadDocuments();
+    async function loadSavedQAs() {
+        if (!currentDocId) return;
+        const res = await authFetch(`/api/document/${currentDocId}/qa`);
+        loadedQAs = await res.json();
+        
+        const container = document.getElementById('savedQaContainer');
+        const list = document.getElementById('savedQaList');
+        document.getElementById('qaCountBadge').innerText = loadedQAs.length;
+        
+        if (loadedQAs.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+        
+        container.style.display = 'block';
+        list.innerHTML = loadedQAs.map(qa => {
+            const chunksHtml = (qa.relevant_chunks || []).map(c => {
+                const phrases = (c.key_phrases || []).join(', ');
+                return `<span class="badge ${c.relevance === 2 ? 'bg-success' : 'bg-info text-dark'} text-truncate" style="max-width: 180px;" title="${phrases}">
+                            ${c.chunk_id.substring(0,6)}: ${phrases || 'Без фраз'}
+                        </span>`;
+            }).join(' ');
+
+            return `
+            <div class="card shadow-sm border-0 bg-light">
+                <div class="card-body p-2">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <strong class="text-dark small d-block mb-1">${qa.question}</strong>
+                        <div class="btn-group btn-group-sm ms-2" style="flex-shrink: 0;">
+                            <button class="btn btn-outline-primary" onclick="editQA(${qa.id})" title="Редактировать"><i class="bi bi-pencil"></i></button>
+                            <button class="btn btn-outline-danger" onclick="deleteQA(${qa.id})" title="Удалить"><i class="bi bi-trash"></i></button>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-1 mt-1">${chunksHtml}</div>
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    async function deleteQA(qaId) {
+        if (!confirm("Удалить эту Q&A пару?")) return;
+        const res = await authFetch(`/api/qa/${qaId}`, { method: 'DELETE' });
+        if (res.ok) {
+            if (editingQaId === qaId) cancelEdit(); 
+            await loadSavedQAs();
+            loadDocuments(); 
+        } else { alert("Ошибка удаления"); }
+    }
+
+    function editQA(qaId) {
+        const qa = loadedQAs.find(q => q.id === qaId);
+        if (!qa) return;
+
+        editingQaId = qaId;
+        document.getElementById('questionInput').value = qa.question;
+
+        // Сброс визуалов
+        document.querySelectorAll('.chunk-card').forEach(card => {
+            card.classList.remove('selected-high', 'selected-low');
+            card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
+        });
+        
+        selectedChunks = {};
+        
+        // Восстановление
+        (qa.relevant_chunks || []).forEach(c => {
+            selectedChunks[c.chunk_id] = { relevance: c.relevance, key_phrases: (c.key_phrases || []).join(', ') };
+            updateChunkVisuals(c.chunk_id);
+        });
+
+        updateSelectionBadges();
+
+        // UI переключение
+        document.getElementById('formTitle').innerHTML = '<i class="bi bi-pencil-square me-2"></i>Редактирование Q&A';
+        document.getElementById('formTitle').classList.replace('text-primary', 'text-warning');
+        
+        const btn = document.getElementById('saveQaBtn');
+        btn.innerHTML = '<i class="bi bi-save"></i> Обновить Q&A';
+        btn.classList.replace('btn-primary', 'btn-warning');
+        
+        document.getElementById('cancelEditBtn').classList.remove('d-none');
+        document.getElementById('pane-workspace').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function cancelEdit() {
+        editingQaId = null;
+        document.getElementById('questionInput').value = '';
+        
+        document.querySelectorAll('.chunk-card').forEach(card => {
+            card.classList.remove('selected-high', 'selected-low');
+            card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
+        });
+        selectedChunks = {};
+        updateSelectionBadges();
+
+        document.getElementById('formTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Новый Q&A';
+        document.getElementById('formTitle').classList.replace('text-warning', 'text-primary');
+        
+        const btn = document.getElementById('saveQaBtn');
+        btn.innerHTML = 'Добавить в датасет';
+        btn.classList.replace('btn-warning', 'btn-primary');
+        
+        document.getElementById('cancelEditBtn').classList.add('d-none');
     }
 
     function renderChunks(chunks, keyword = '') {
@@ -298,9 +431,11 @@ async function openDoc(docId, filename, status) {
                 const re = new RegExp(`(${keyword})`, 'gi');
                 text = text.replace(re, '<span class="highlight">$1</span>');
             }
-            let extraClass = selectedChunks[c.id] === 2 ? 'selected-high' : (selectedChunks[c.id] === 1 ? 'selected-low' : '');
-            let btnH = selectedChunks[c.id] === 2 ? 'active fw-bold' : '';
-            let btnL = selectedChunks[c.id] === 1 ? 'active fw-bold' : '';
+            
+            let chunkData = selectedChunks[c.id];
+            let extraClass = chunkData?.relevance === 2 ? 'selected-high' : (chunkData?.relevance === 1 ? 'selected-low' : '');
+            let btnH = chunkData?.relevance === 2 ? 'active fw-bold' : '';
+            let btnL = chunkData?.relevance === 1 ? 'active fw-bold' : '';
             
             return `
             <div class="chunk-card ${extraClass}" id="chunk-${c.id}">
@@ -316,11 +451,13 @@ async function openDoc(docId, filename, status) {
         }).join('');
     }
 
-    // БАГФИКС 3: Теперь мы не перерисовываем весь DOM, а точечно меняем классы. Клик мгновенный!
     function toggleChunk(id, relevance) {
-        if(selectedChunks[id] === relevance) delete selectedChunks[id];
-        else selectedChunks[id] = relevance;
-        
+        if(selectedChunks[id] && selectedChunks[id].relevance === relevance) {
+            delete selectedChunks[id]; 
+        } else {
+            const existingPhrases = selectedChunks[id] ? selectedChunks[id].key_phrases : "";
+            selectedChunks[id] = { relevance: relevance, key_phrases: existingPhrases };
+        }
         updateChunkVisuals(id);
         updateSelectionBadges();
     }
@@ -333,9 +470,9 @@ async function openDoc(docId, filename, status) {
         const btns = card.querySelectorAll('button');
         btns.forEach(b => b.classList.remove('active', 'fw-bold'));
         
-        if(selectedChunks[id] === 2) {
+        if(selectedChunks[id]?.relevance === 2) {
             card.classList.add('selected-high'); btns[0].classList.add('active', 'fw-bold');
-        } else if (selectedChunks[id] === 1) {
+        } else if (selectedChunks[id]?.relevance === 1) {
             card.classList.add('selected-low'); btns[1].classList.add('active', 'fw-bold');
         }
     }
@@ -346,9 +483,20 @@ async function openDoc(docId, filename, status) {
         if(keys.length === 0) return container.innerHTML = '<span class="text-muted small">Кликните «Основа» или «Контекст» на чанке ниже</span>';
         
         container.innerHTML = keys.map(id => {
-            const rel = selectedChunks[id];
-            const cls = rel === 2 ? 'bg-success' : 'bg-info text-dark';
-            return `<span class="badge ${cls} shadow-sm border border-light" title="${id}">${rel===2?'Основа':'Контекст'}: ${id.substring(0, 8)}...</span>`;
+            const data = selectedChunks[id];
+            const cls = data.relevance === 2 ? 'bg-success' : 'bg-info text-dark';
+            const label = data.relevance === 2 ? 'Основа' : 'Контекст';
+            
+            return `
+            <div class="w-100 bg-white border rounded p-2 shadow-sm">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <span class="badge ${cls}">${label}: ${id.substring(0,8)}...</span>
+                </div>
+                <input type="text" class="form-control form-control-sm" 
+                       placeholder="Ключевые фразы (через запятую)" 
+                       value="${data.key_phrases}" 
+                       oninput="selectedChunks['${id}'].key_phrases = this.value">
+            </div>`;
         }).join('');
     }
 
@@ -357,88 +505,35 @@ async function openDoc(docId, filename, status) {
         renderChunks(allChunks.filter(c => c.text.toLowerCase().includes(q)), q);
     }
 
-    async function resetMarkup() {
-        if(!currentDocId) return;
-        
-        // Защита от случайного клика
-        const isConfirmed = confirm("⚠️ Вы уверены, что хотите безвозвратно удалить ВСЮ разметку (вопросы и выбранные чанки) для этого документа?");
-        if(!isConfirmed) return;
-        
-        const res = await authFetch(`/api/document/${currentDocId}/reset`, { method: 'DELETE' });
-        
-        if(res.ok) {
-            // Очищаем формы
-            document.getElementById('questionInput').value = ''; 
-            document.getElementById('keywordInput').value = '';
-            
-            // Сбрасываем выбранные чанки в памяти
-            selectedChunks = {}; 
-            updateSelectionBadges();
-            
-            // Визуально отжимаем все кнопки на чанках
-            document.querySelectorAll('.chunk-card').forEach(card => {
-                card.classList.remove('selected-high', 'selected-low');
-                card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
-            });
-            
-            // Обновляем список документов слева (чтобы сбросился счетчик Q&A и статус)
-            loadDocuments(); 
-            
-            // Возвращаем кнопку "Завершить" в исходное состояние, если она была желтой
-            const btn = document.getElementById('markDoneBtn');
-            btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить';
-            btn.className = 'btn btn-sm btn-outline-success';
-            
-        } else {
-            const errorData = await res.json();
-            alert("⚠️ Ошибка сброса: " + (errorData.detail || "Неизвестная ошибка"));
-        }
-    }
-
     async function saveQA() {
         const q = document.getElementById('questionInput').value.trim();
-        const kw = document.getElementById('keywordInput').value.trim();
-        const chunksArr = Object.entries(selectedChunks).map(([id, rel]) => ({ chunk_id: id, relevance: rel }));
+        const chunksArr = Object.entries(selectedChunks).map(([id, data]) => {
+            const phrases = data.key_phrases.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            return { chunk_id: id, relevance: data.relevance, key_phrases: phrases };
+        });
         
-        if(!q || !kw || chunksArr.length === 0) return alert("⚠️ Заполните вопрос, ключевую фразу и выберите хотя бы один чанк!");
+        if(!q || chunksArr.length === 0) return alert("⚠️ Заполните вопрос и выберите чанки!");
         
-        const res = await authFetch('/api/qa', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ document_id: currentDocId, question: q, key_phrase: kw, relevant_chunks: chunksArr })
+        const url = editingQaId ? `/api/qa/${editingQaId}` : '/api/qa';
+        const method = editingQaId ? 'PUT' : 'POST';
+        
+        const res = await authFetch(url, {
+            method: method, headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ document_id: currentDocId, question: q, relevant_chunks: chunksArr })
         });
         
         if(res.ok) {
-            document.getElementById('questionInput').value = ''; 
-            document.getElementById('keywordInput').value = '';
-            selectedChunks = {}; 
-            updateSelectionBadges();
-            
-            // Сбрасываем визуал чанков без полной перерисовки
-            document.querySelectorAll('.chunk-card').forEach(card => {
-                card.classList.remove('selected-high', 'selected-low');
-                card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
-            });
-            
+            cancelEdit(); 
+            await loadSavedQAs(); 
             loadDocuments(); 
-            const btn = document.querySelector('.sticky-header .btn-primary');
+            
+            const btn = document.getElementById('saveQaBtn');
             const orig = btn.innerHTML;
-            btn.innerHTML = '<i class="bi bi-check-lg"></i> Сохранено!'; 
-            btn.classList.replace('btn-primary', 'btn-success');
-            setTimeout(() => { 
-                btn.innerHTML = orig; 
-                btn.classList.replace('btn-success', 'btn-primary'); 
-            }, 1500);
+            btn.innerHTML = '<i class="bi bi-check-lg"></i> Успешно!'; btn.classList.replace('btn-primary', 'btn-success');
+            setTimeout(() => { btn.innerHTML = orig; btn.classList.replace('btn-success', 'btn-primary'); }, 1500);
         } else { 
-            // Умный парсинг ошибок от бэкенда
-            const errorData = await res.json();
-            if (Array.isArray(errorData.detail)) {
-                // Если это 422 ошибка FastAPI, detail - это массив объектов
-                const messages = errorData.detail.map(err => `- Поле [${err.loc.join(' > ')}]: ${err.msg}`).join('\n');
-                alert("⚠️ Ошибка валидации данных бэкендом:\n" + messages);
-            } else {
-                // Если это обычная строка (например, 400 или 403 ошибка)
-                alert("⚠️ " + (errorData.detail || "Неизвестная ошибка сохранения"));
-            }
+            const errData = await res.json();
+            alert("⚠️ Ошибка: " + (Array.isArray(errData.detail) ? errData.detail.map(e => e.msg).join('\n') : errData.detail));
         }
     }
 </script>
