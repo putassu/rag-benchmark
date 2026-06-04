@@ -238,20 +238,25 @@ async function openDoc(docId, filename, status) {
         if (!fallbackDiv) {
             fallbackDiv = document.createElement('div');
             fallbackDiv.id = 'noPreviewFallback';
-            fallbackDiv.className = 'd-flex flex-column justify-content-center align-items-center h-100 bg-light';
+            // Убрали d-flex из базовых классов, будем управлять им динамически
+            fallbackDiv.className = 'flex-column justify-content-center align-items-center h-100 bg-light';
             pdfContainer.parentNode.insertBefore(fallbackDiv, pdfContainer);
         }
         
-        // 3. Умная маршрутизация отображения
+        // 3. Умная маршрутизация отображения с переключением классов
         if (supportedFormats.includes(ext)) {
-            // Показываем iframe для PDF
-            fallbackDiv.style.display = 'none';
-            pdfContainer.style.display = 'block';
+            // Прячем плашку, показываем iframe
+            fallbackDiv.classList.add('d-none');
+            fallbackDiv.classList.remove('d-flex');
+            
+            pdfContainer.classList.remove('d-none');
             pdfContainer.src = fileUrl;
         } else {
-            // Прячем iframe и показываем кнопку скачивания для DOCX/XLSX
-            pdfContainer.style.display = 'none';
-            fallbackDiv.style.display = 'flex';
+            // Прячем iframe, показываем плашку
+            pdfContainer.classList.add('d-none');
+            
+            fallbackDiv.classList.remove('d-none');
+            fallbackDiv.classList.add('d-flex');
             fallbackDiv.innerHTML = `
                 <i class="bi bi-file-earmark-word display-1 text-secondary mb-3"></i>
                 <h5 class="text-secondary">Предпросмотр недоступен</h5>
