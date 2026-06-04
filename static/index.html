@@ -5,66 +5,38 @@
     <title>RAG Benchmark Platform</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/split.js/1.6.5/split.min.js"></script>
-    
     <style>
-        :root {
-            --bg-dark: #1e1e2f;
-            --bg-panel: #f8f9fa;
-            --border-color: #dee2e6;
-            --brand-color: #0d6efd;
-        }
-
+        :root { --bg-dark: #1e1e2f; --bg-panel: #f8f9fa; --border-color: #dee2e6; --brand-color: #0d6efd; }
         * { box-sizing: border-box; }
         body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background-color: var(--bg-panel); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
-
         ::-webkit-scrollbar { width: 6px; height: 6px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-
         .split-wrapper { display: flex; flex-direction: row; height: 100vh; width: 100vw; }
-        
         .split-pane { overflow-y: auto; overflow-x: hidden; background-color: white; height: 100%; }
         #pane-sidebar { width: 12%; background-color: var(--bg-dark); }
         #pane-docs { width: 18%; }
         #pane-pdf { width: 40%; background: #f1f5f9; }
         #pane-workspace { width: 30%; }
-
-        .gutter {
-            background-color: var(--border-color);
-            background-repeat: no-repeat;
-            background-position: 50%;
-            cursor: col-resize;
-            transition: background-color 0.2s;
-        }
+        .gutter { background-color: var(--border-color); cursor: col-resize; transition: 0.2s; }
         .gutter:hover { background-color: var(--brand-color); }
         .gutter.gutter-horizontal { width: 6px; }
-
         #pane-sidebar { display: flex; flex-direction: column; color: white; }
         #pane-sidebar a { color: #adb5bd; text-decoration: none; padding: 12px 20px; border-left: 3px solid transparent; font-size: 0.95rem; }
         #pane-sidebar a:hover, #pane-sidebar a.active { color: white; background-color: rgba(255,255,255,0.1); border-left-color: var(--brand-color); }
-
         .doc-item { cursor: pointer; border-left: 4px solid transparent; transition: all 0.15s ease; border-bottom: 1px solid var(--border-color); }
         .doc-item:hover { background-color: #f1f5f9; }
         .doc-item.active { background-color: #eff6ff; border-left-color: var(--brand-color); }
-
         #pdf-container { display: flex; flex-direction: column; height: 100%; }
         iframe { flex-grow: 1; border: none; width: 100%; }
-
-        .sticky-header {
-            position: sticky; top: 0; z-index: 100; background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(5px); border-bottom: 1px solid var(--border-color);
-            padding: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-        }
-
+        .sticky-header { position: sticky; top: 0; z-index: 100; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(5px); border-bottom: 1px solid var(--border-color); padding: 15px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
         .chunk-list { padding: 15px; }
         .chunk-card { border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; margin-bottom: 12px; background: white; transition: 0.1s; }
         .chunk-card:hover { border-color: #adb5bd; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
         .chunk-card.selected-high { border: 2px solid #198754; background-color: #f0fdf4; }
         .chunk-card.selected-low { border: 2px solid #0dcaf0; background-color: #f0f9ff; }
-        
         .highlight { background-color: #fef08a; font-weight: 500; border-radius: 2px; padding: 0 2px; }
         #loginOverlay { position: fixed; inset: 0; background: var(--bg-panel); z-index: 9999; display: flex; justify-content: center; align-items: center; }
     </style>
@@ -124,14 +96,13 @@
     </div>
 
     <div id="pane-workspace" class="split-pane">
-        
         <div class="sticky-header">
             <div class="d-flex justify-content-between align-items-center mb-3">
                 <h6 class="text-primary fw-bold m-0" id="formTitle"><i class="bi bi-plus-circle me-2"></i>Новый Q&A</h6>
                 <button class="btn btn-sm btn-outline-secondary d-none" id="cancelEditBtn" onclick="cancelEdit()">Отменить ред.</button>
             </div>
             
-            <textarea id="questionInput" class="form-control mb-2" rows="2" placeholder="Что спрашивает пользователь?"></textarea>
+            <textarea id="questionInput" class="form-control mb-3" rows="2" placeholder="Что спрашивает пользователь?"></textarea>
             
             <div class="p-2 bg-light rounded border mb-3">
                 <div class="text-muted small fw-bold mb-2">Выбранные чанки и фразы:</div>
@@ -164,15 +135,19 @@
     let token = localStorage.getItem('token');
     let currentDocId = null;
     let allChunks = [];
-    let selectedChunks = {}; // { "uuid": { relevance: 2, key_phrases: "фраза1, фраза2" } }
+    
+    // ВАЖНО: Теперь это МАССИВ объектов, что позволяет иметь дубликаты чанков
+    let selectedChunks = []; 
     let loadedQAs = []; 
     let editingQaId = null; 
+
+    // Генератор уникального UI ID для каждой карточки в боковой панели
+    function generateUiId() { return Math.random().toString(36).substr(2, 9); }
 
     if (token) {
         document.getElementById('loginOverlay').style.display = 'none';
         document.getElementById('appContent').style.display = 'flex';
-        initSplitter();
-        loadDocuments();
+        initSplitter(); loadDocuments();
     }
 
     async function login() {
@@ -186,8 +161,7 @@
             localStorage.setItem('token', data.access_token); token = data.access_token;
             document.getElementById('loginOverlay').style.display = 'none';
             document.getElementById('appContent').style.display = 'flex';
-            initSplitter();
-            loadDocuments();
+            initSplitter(); loadDocuments();
         } else { alert('Ошибка авторизации. Проверьте логин и пароль.'); }
     }
 
@@ -203,13 +177,9 @@
     function initSplitter() {
         try {
             Split(['#pane-sidebar', '#pane-docs', '#pane-pdf', '#pane-workspace'], {
-                sizes: [12, 18, 40, 30],
-                minSize: [60, 200, 300, 350],
-                gutterSize: 6, snapOffset: 0
+                sizes: [12, 18, 40, 30], minSize: [60, 200, 300, 350], gutterSize: 6, snapOffset: 0
             });
-        } catch (e) {
-            console.error("Split.js fallback:", e);
-        }
+        } catch (e) { console.error("Split.js fallback:", e); }
     }
 
     async function loadDocuments() {
@@ -232,8 +202,6 @@
         if(!currentDocId) return;
         await authFetch(`/api/document/${currentDocId}/complete`, { method: 'POST' });
         loadDocuments();
-        
-        // Визуальное обновление кнопки
         const btn = document.getElementById('markDoneBtn');
         if(btn.innerText.includes('Завершить')) {
             btn.innerHTML = '<i class="bi bi-arrow-counterclockwise"></i> Вернуть';
@@ -254,14 +222,10 @@
             cancelEdit();
             await loadSavedQAs();
             loadDocuments(); 
-            
             const btn = document.getElementById('markDoneBtn');
             btn.innerHTML = '<i class="bi bi-check2-circle"></i> Завершить';
             btn.className = 'btn btn-sm btn-outline-success shadow-sm';
-        } else {
-            const err = await res.json();
-            alert("⚠️ Ошибка сброса: " + (err.detail || "Неизвестная ошибка"));
-        }
+        } else { alert("⚠️ Ошибка сброса: " + ((await res.json()).detail || "Неизвестная ошибка")); }
     }
 
     async function openDoc(docId, filename, status) {
@@ -307,13 +271,13 @@
         
         document.getElementById('resetMarkupBtn').classList.remove('d-none');
         
-        cancelEdit(); // Сброс режима редактирования
+        cancelEdit(); 
         document.getElementById('chunksList').innerHTML = '<div class="text-center mt-4"><div class="spinner-border text-primary"></div></div>';
         
         const res = await authFetch(`/api/document/${docId}/chunks`);
         allChunks = await res.json();
         renderChunks(allChunks);
-        await loadSavedQAs(); // Подгружаем сохраненную разметку
+        await loadSavedQAs(); 
     }
 
     async function loadSavedQAs() {
@@ -325,17 +289,14 @@
         const list = document.getElementById('savedQaList');
         document.getElementById('qaCountBadge').innerText = loadedQAs.length;
         
-        if (loadedQAs.length === 0) {
-            container.style.display = 'none';
-            return;
-        }
+        if (loadedQAs.length === 0) { container.style.display = 'none'; return; }
         
         container.style.display = 'block';
         list.innerHTML = loadedQAs.map(qa => {
             const chunksHtml = (qa.relevant_chunks || []).map(c => {
-                const phrases = (c.key_phrases || []).join(', ');
-                return `<span class="badge ${c.relevance === 2 ? 'bg-success' : 'bg-info text-dark'} text-truncate" style="max-width: 180px;" title="${phrases}">
-                            ${c.chunk_id.substring(0,6)}: ${phrases || 'Без фраз'}
+                const phrase = c.key_phrase || 'Без фразы';
+                return `<span class="badge ${c.relevance === 2 ? 'bg-success' : 'bg-info text-dark'} text-truncate" style="max-width: 180px;" title="${phrase.replace(/"/g, '&quot;')}">
+                            ${c.chunk_id.substring(0,6)}: ${phrase}
                         </span>`;
             }).join(' ');
 
@@ -360,42 +321,33 @@
         const res = await authFetch(`/api/qa/${qaId}`, { method: 'DELETE' });
         if (res.ok) {
             if (editingQaId === qaId) cancelEdit(); 
-            await loadSavedQAs();
-            loadDocuments(); 
+            await loadSavedQAs(); loadDocuments(); 
         } else { alert("Ошибка удаления"); }
     }
 
     function editQA(qaId) {
         const qa = loadedQAs.find(q => q.id === qaId);
         if (!qa) return;
-
         editingQaId = qaId;
         document.getElementById('questionInput').value = qa.question;
 
-        // Сброс визуалов
-        document.querySelectorAll('.chunk-card').forEach(card => {
-            card.classList.remove('selected-high', 'selected-low');
-            card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
-        });
-        
-        selectedChunks = {};
-        
-        // Восстановление
-        (qa.relevant_chunks || []).forEach(c => {
-            selectedChunks[c.chunk_id] = { relevance: c.relevance, key_phrases: (c.key_phrases || []).join(', ') };
-            updateChunkVisuals(c.chunk_id);
-        });
+        // Очищаем текущий массив и заполняем из базы
+        selectedChunks = (qa.relevant_chunks || []).map(c => ({
+            uiId: generateUiId(),
+            chunkId: c.chunk_id,
+            relevance: c.relevance,
+            keyPhrase: c.key_phrase || ""
+        }));
 
         updateSelectionBadges();
+        document.querySelectorAll('.chunk-card').forEach(card => updateChunkVisuals(card.id.replace('chunk-', '')));
 
-        // UI переключение
         document.getElementById('formTitle').innerHTML = '<i class="bi bi-pencil-square me-2"></i>Редактирование Q&A';
         document.getElementById('formTitle').classList.replace('text-primary', 'text-warning');
         
         const btn = document.getElementById('saveQaBtn');
         btn.innerHTML = '<i class="bi bi-save"></i> Обновить Q&A';
         btn.classList.replace('btn-primary', 'btn-warning');
-        
         document.getElementById('cancelEditBtn').classList.remove('d-none');
         document.getElementById('pane-workspace').scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -403,13 +355,12 @@
     function cancelEdit() {
         editingQaId = null;
         document.getElementById('questionInput').value = '';
+        selectedChunks = []; updateSelectionBadges();
         
         document.querySelectorAll('.chunk-card').forEach(card => {
             card.classList.remove('selected-high', 'selected-low');
             card.querySelectorAll('button').forEach(b => b.classList.remove('active', 'fw-bold'));
         });
-        selectedChunks = {};
-        updateSelectionBadges();
 
         document.getElementById('formTitle').innerHTML = '<i class="bi bi-plus-circle me-2"></i>Новый Q&A';
         document.getElementById('formTitle').classList.replace('text-warning', 'text-primary');
@@ -417,7 +368,6 @@
         const btn = document.getElementById('saveQaBtn');
         btn.innerHTML = 'Добавить в датасет';
         btn.classList.replace('btn-warning', 'btn-primary');
-        
         document.getElementById('cancelEditBtn').classList.add('d-none');
     }
 
@@ -432,10 +382,13 @@
                 text = text.replace(re, '<span class="highlight">$1</span>');
             }
             
-            let chunkData = selectedChunks[c.id];
-            let extraClass = chunkData?.relevance === 2 ? 'selected-high' : (chunkData?.relevance === 1 ? 'selected-low' : '');
-            let btnH = chunkData?.relevance === 2 ? 'active fw-bold' : '';
-            let btnL = chunkData?.relevance === 1 ? 'active fw-bold' : '';
+            const instances = selectedChunks.filter(sc => sc.chunkId === c.id);
+            let extraClass = '', btnH = '', btnL = '';
+            
+            if (instances.length > 0) {
+                if (instances[0].relevance === 2) { extraClass = 'selected-high'; btnH = 'active fw-bold'; }
+                else { extraClass = 'selected-low'; btnL = 'active fw-bold'; }
+            }
             
             return `
             <div class="chunk-card ${extraClass}" id="chunk-${c.id}">
@@ -451,14 +404,23 @@
         }).join('');
     }
 
-    function toggleChunk(id, relevance) {
-        if(selectedChunks[id] && selectedChunks[id].relevance === relevance) {
-            delete selectedChunks[id]; 
+    function toggleChunk(chunkId, relevance) {
+        const existing = selectedChunks.filter(c => c.chunkId === chunkId);
+        
+        if (existing.length > 0) {
+            if (existing[0].relevance === relevance) {
+                // Если кликнули на ту же кнопку - полностью удаляем чанк из выборки
+                selectedChunks = selectedChunks.filter(c => c.chunkId !== chunkId);
+            } else {
+                // Если кликнули на другую - меняем релевантность у всех копий этого чанка
+                selectedChunks.forEach(c => { if(c.chunkId === chunkId) c.relevance = relevance; });
+            }
         } else {
-            const existingPhrases = selectedChunks[id] ? selectedChunks[id].key_phrases : "";
-            selectedChunks[id] = { relevance: relevance, key_phrases: existingPhrases };
+            // Добавляем новый чанк
+            selectedChunks.push({ uiId: generateUiId(), chunkId: chunkId, relevance: relevance, keyPhrase: "" });
         }
-        updateChunkVisuals(id);
+        
+        updateChunkVisuals(chunkId);
         updateSelectionBadges();
     }
 
@@ -470,32 +432,62 @@
         const btns = card.querySelectorAll('button');
         btns.forEach(b => b.classList.remove('active', 'fw-bold'));
         
-        if(selectedChunks[id]?.relevance === 2) {
-            card.classList.add('selected-high'); btns[0].classList.add('active', 'fw-bold');
-        } else if (selectedChunks[id]?.relevance === 1) {
-            card.classList.add('selected-low'); btns[1].classList.add('active', 'fw-bold');
+        const instances = selectedChunks.filter(c => c.chunkId === id);
+        if (instances.length > 0) {
+            if (instances[0].relevance === 2) {
+                card.classList.add('selected-high'); btns[0].classList.add('active', 'fw-bold');
+            } else {
+                card.classList.add('selected-low'); btns[1].classList.add('active', 'fw-bold');
+            }
         }
+    }
+
+    // Дублирование чанка для ввода второй фразы
+    function duplicateChunkInstance(chunkId, relevance) {
+        selectedChunks.push({ uiId: generateUiId(), chunkId: chunkId, relevance: relevance, keyPhrase: "" });
+        updateSelectionBadges();
+    }
+
+    // Удаление конкретной фразы
+    function removeChunkInstance(uiId, chunkId) {
+        selectedChunks = selectedChunks.filter(c => c.uiId !== uiId);
+        updateChunkVisuals(chunkId);
+        updateSelectionBadges();
+    }
+
+    function updateKeyPhrase(uiId, val) {
+        const item = selectedChunks.find(c => c.uiId === uiId);
+        if (item) item.keyPhrase = val;
     }
 
     function updateSelectionBadges() {
         const container = document.getElementById('selectedChunksBadgeList');
-        const keys = Object.keys(selectedChunks);
-        if(keys.length === 0) return container.innerHTML = '<span class="text-muted small">Кликните «Основа» или «Контекст» на чанке ниже</span>';
+        if(selectedChunks.length === 0) {
+            container.innerHTML = '<span class="text-muted small">Кликните «Основа» или «Контекст» на чанке ниже</span>';
+            return;
+        }
         
-        container.innerHTML = keys.map(id => {
-            const data = selectedChunks[id];
+        container.innerHTML = selectedChunks.map(data => {
             const cls = data.relevance === 2 ? 'bg-success' : 'bg-info text-dark';
             const label = data.relevance === 2 ? 'Основа' : 'Контекст';
             
             return `
             <div class="w-100 bg-white border rounded p-2 shadow-sm">
                 <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span class="badge ${cls}">${label}: ${id.substring(0,8)}...</span>
+                    <span class="badge ${cls}">${label}: ${data.chunkId.substring(0,8)}...</span>
+                    <div>
+                        <button class="btn btn-sm btn-light py-0 px-1 text-primary me-1 border" onclick="duplicateChunkInstance('${data.chunkId}', ${data.relevance})" title="Добавить еще фразу для этого же чанка">
+                            <i class="bi bi-plus"></i> Фраза
+                        </button>
+                        <button class="btn btn-sm btn-light py-0 px-1 text-danger border" onclick="removeChunkInstance('${data.uiId}', '${data.chunkId}')" title="Удалить">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
                 </div>
                 <input type="text" class="form-control form-control-sm" 
-                       placeholder="Ключевые фразы (через запятую)" 
-                       value="${data.key_phrases}" 
-                       oninput="selectedChunks['${id}'].key_phrases = this.value">
+                       placeholder="Ключевая фраза (любые символы, включая запятые)" 
+                       value="${data.keyPhrase.replace(/"/g, '&quot;')}" 
+                       oninput="updateKeyPhrase('${data.uiId}', this.value)">
             </div>`;
         }).join('');
     }
@@ -507,9 +499,10 @@
 
     async function saveQA() {
         const q = document.getElementById('questionInput').value.trim();
-        const chunksArr = Object.entries(selectedChunks).map(([id, data]) => {
-            const phrases = data.key_phrases.split(',').map(s => s.trim()).filter(s => s.length > 0);
-            return { chunk_id: id, relevance: data.relevance, key_phrases: phrases };
+        
+        // Подготавливаем чанки (обрезаем пробелы по краям фразы)
+        const chunksArr = selectedChunks.map(data => {
+            return { chunk_id: data.chunkId, relevance: data.relevance, key_phrase: data.keyPhrase.trim() };
         });
         
         if(!q || chunksArr.length === 0) return alert("⚠️ Заполните вопрос и выберите чанки!");
@@ -523,10 +516,7 @@
         });
         
         if(res.ok) {
-            cancelEdit(); 
-            await loadSavedQAs(); 
-            loadDocuments(); 
-            
+            cancelEdit(); await loadSavedQAs(); loadDocuments(); 
             const btn = document.getElementById('saveQaBtn');
             const orig = btn.innerHTML;
             btn.innerHTML = '<i class="bi bi-check-lg"></i> Успешно!'; btn.classList.replace('btn-primary', 'btn-success');
