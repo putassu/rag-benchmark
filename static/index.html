@@ -222,14 +222,51 @@ async function openDoc(docId, filename, status) {
         
         currentDocId = docId;
         document.getElementById('currentDocTitle').innerText = filename;
-        document.getElementById('pdfViewer').src = `/docs/${filename}`;
+        
+        // 1. Правильно кодируем URL (спасает от пробелов, скобок и кириллицы)
+        const encodedFilename = encodeURIComponent(filename);
+        const fileUrl = `/docs/${encodedFilename}`;
+        
+        // 2. Проверяем расширение файла
+        const ext = filename.split('.').pop().toLowerCase();
+        const supportedFormats = ['pdf', 'txt', 'png', 'jpg', 'jpeg'];
+        
+        const pdfContainer = document.getElementById('pdfViewer');
+        
+        // Создаем div-заглушку, если её еще нет
+        let fallbackDiv = document.getElementById('noPreviewFallback');
+        if (!fallbackDiv) {
+            fallbackDiv = document.createElement('div');
+            fallbackDiv.id = 'noPreviewFallback';
+            fallbackDiv.className = 'd-flex flex-column justify-content-center align-items-center h-100 bg-light';
+            pdfContainer.parentNode.insertBefore(fallbackDiv, pdfContainer);
+        }
+        
+        // 3. Умная маршрутизация отображения
+        if (supportedFormats.includes(ext)) {
+            // Показываем iframe для PDF
+            fallbackDiv.style.display = 'none';
+            pdfContainer.style.display = 'block';
+            pdfContainer.src = fileUrl;
+        } else {
+            // Прячем iframe и показываем кнопку скачивания для DOCX/XLSX
+            pdfContainer.style.display = 'none';
+            fallbackDiv.style.display = 'flex';
+            fallbackDiv.innerHTML = `
+                <i class="bi bi-file-earmark-word display-1 text-secondary mb-3"></i>
+                <h5 class="text-secondary">Предпросмотр недоступен</h5>
+                <p class="text-muted small">Браузер не поддерживает отображение файлов .${ext}</p>
+                <a href="${fileUrl}" class="btn btn-primary mt-2" target="_blank" download>
+                    <i class="bi bi-download me-2"></i>Скачать оригинал
+                </a>
+            `;
+        }
         
         const btn = document.getElementById('markDoneBtn');
         btn.classList.remove('d-none');
         btn.innerHTML = status === 'Готово' ? '<i class="bi bi-arrow-counterclockwise"></i> Вернуть' : '<i class="bi bi-check2-circle"></i> Завершить';
         btn.className = status === 'Готово' ? 'btn btn-sm btn-outline-warning' : 'btn btn-sm btn-outline-success';
         
-        // Показываем кнопку сброса
         document.getElementById('resetMarkupBtn').classList.remove('d-none');
         
         selectedChunks = {}; updateSelectionBadges();
