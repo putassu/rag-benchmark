@@ -29,8 +29,13 @@ class QAPair(Base):
     id = Column(Integer, primary_key=True, index=True)
     document_id = Column(Integer, ForeignKey("documents.id"))
     question = Column(Text)
-    key_phrase = Column(Text) 
-    relevant_chunks = Column(JSON) # [{"chunk_id": "uuid-string", "relevance": 2}]
+    
+    # Оставляем старую колонку для обратной совместимости со старой разметкой
+    key_phrase = Column(Text, nullable=True) 
+    
+    # А новые ключевые фразы теперь будут лежать внутри JSON-массива чанков:
+    # [{"chunk_id": "...", "relevance": 2, "key_phrases": ["фраза 1", "фраза 2"]}]
+    relevant_chunks = Column(JSON) 
     
     document = relationship("Document", back_populates="qa_pairs")
 
