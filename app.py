@@ -40,14 +40,16 @@ app.mount("/docs", StaticFiles(directory=config.DOCS_DIR), name="docs")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 class ChunkRelevance(BaseModel):
-    chunk_id: str  # Теперь Pydantic знает, что это строковый UUID
-    relevance: int # А это вес (1 или 2)
+    chunk_id: str
+    relevance: int
+    # Теперь каждый чанк может содержать свой список ключевых фраз
+    key_phrases: List[str] = Field(default_factory=list) 
 
 class QAPairCreate(BaseModel):
     document_id: int
     question: str
-    key_phrase: str
-    relevant_chunks: List[ChunkRelevance] # Используем новую модель
+    # Глобальную key_phrase мы отсюда удалили!
+    relevant_chunks: List[ChunkRelevance]
 
 def get_db():
     session = db.SessionLocal()
