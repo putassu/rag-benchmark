@@ -226,3 +226,38 @@ def export_database(current_user: db.User = Depends(get_current_user)):
         filename=f"rag_dataset_backup_{datetime.now().strftime('%Y%m%d_%H%M')}.db",
         media_type="application/octet-stream"
     )
+
+class QAPairUpdate(BaseModel):
+    question: str
+    relevant_chunks: List[ChunkRelevance]
+
+@app.delete("/api/qa/{qa_id}")
+def delete_qa(qa_id: int, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):
+    qa = session.query(db.QAPair).filter(db.QAPair.id == qa_id).first()
+    if not qa:
+        raise HTTPException(status_code=404, detail="Q&A не найден")
+    
+    # Проверка прав (документ должен принадлежать текущему юзеру)
+    doc = session.query(db.Document).filter(db.Document.id == qa.document_id, db.Document.assignee_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+        
+    session.delete(qa)
+    session.commit()
+    return {"status": "success"}
+
+@app.put("/api/qa/{qa_id}")
+def update_qa(qa_id: int, qa_update: QAPairUpdate, current_user: db.User = Depends(get_current_user), session: Session = Depends(get_db)):
+    qa = session.query(db.QAPair).filter(db.QAPair.id == qa_id).first()
+    if not qa:
+        raise HTTPException(status_code=404, detail="Q&A не найден")
+        
+    doc = session.query(db.Document).filter(db.Document.id == qa.document_id, db.Document.assignee_id == current_user.id).first()
+    if not doc:
+        raise HTTPException(status_code=403, detail="Доступ запрещен")
+        
+    qa.question = qa_update.question
+    # Сериализуем новые чанки и фразы в JSON
+    qa.relevant_chunks = [c.model_dump() for c in qa_update.relevant_chunks]
+    session.commit()
+    return {"status": "success"}
