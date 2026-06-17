@@ -39,4 +39,24 @@ class QAPair(Base):
     
     document = relationship("Document", back_populates="qa_pairs")
 
+from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
+from datetime import datetime
+
+class BenchmarkResult(Base):
+    __tablename__ = "benchmark_results"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    status = Column(String, default="running")  # Три статуса: running, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Метрики
+    total_queries = Column(Integer, nullable=True)
+    skipped = Column(Integer, nullable=True)
+    avg_recall_3 = Column(Float, nullable=True)
+    avg_recall_5 = Column(Float, nullable=True)
+    avg_ndcg_5 = Column(Float, nullable=True)
+    
+    # Полный отчет по каждой QA-паре (детализация)
+    details = Column(JSON, nullable=True)
+
 Base.metadata.create_all(bind=engine)
